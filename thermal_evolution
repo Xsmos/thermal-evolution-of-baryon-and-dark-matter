@@ -1,0 +1,249 @@
+# This code is closely related to paper: https://www.nature.com/articles/s41586-018-0151-x
+from click import style
+import numpy as np
+from scipy.integrate import odeint
+import matplotlib.pyplot as plt
+import math
+import scipy.constants as Cs
+from scipy import integrate
+from scipy.optimize import fsolve
+import datetime
+import os
+
+now = datetime.datetime.now()
+if not os.path.exists("/home/xia/Bin/%s/"%(now.strftime("%m%d"))):
+    os.makedirs("/home/xia/Bin/%s/"%(now.strftime("%m%d")))
+
+N_t_z = 110000 # 11000 # 1100000 goodenough 1% error
+z_max = 1100
+dz = z_max/N_t_z # 0.001#goodenough 1% error
+#time_min = 380000 # year
+time_z_max = 0.0
+time_z0 = 0.0
+#dt = 0.0
+
+H0 = 2.33e-18 # s^-1; 7.36337031e-5 /Myear; # 72 km/s/Mpc
+Omega_Lambda_0 = 0.690 # cosmic density parameter for dark energy
+Omega_r_0 = 5*10**(-5) # cosmic density parameter for non-relativistic matter
+Omega_b_0 = 0.0482 # ordinary (baryonic) matter energy density
+Omega_dm_0 = 0.258 # dark matter energy density
+
+Omega_M_0 = Omega_b_0 + Omega_dm_0 # cosmic density parameter for non-relativistic matter
+Omega_0 = Omega_Lambda_0 + Omega_M_0 + Omega_r_0 # total density parameter at the present time
+
+rho_crit_0 = 1e-26 # kg/m^3 from https://astronomy.swin.edu.au/cosmos/c/Critical+Density
+rho_b_0 = Omega_b_0 * rho_crit_0
+rho_d_0 = Omega_dm_0 * rho_crit_0
+
+f_He = 0.08 # n_He/n_H
+m_chi = 4.8e-13 # J; 3 MeV
+epsilon = 1e-6 # e_chi/e: DM mini-charge in units of the electron charge
+f_dm = 1e-2
+
+T_b = 2.73*(z_max+1) # K
+T_chi = 2.73*(z_max+1) # K
+x_e = 2e-4
+v_chi_b = 29000 # m/s; 29.0 km/s root mean squared velocity
+
+E_0 = -2.1789602e-18 # J; -13.6 eV
+
+recombination_factor = 0.8 # recombination_coefficient??????
+
+# define functions:
+def exactime(z):
+    exactime = integrate.quad(dt2dz,np.inf,z)
+    return exactime[0]
+
+def dt2dz(z):
+    H = Hubble_constant(z)
+    dt2dz = -1/((1+z)*H)
+    return dt2dz
+
+def Hubble_constant(z):
+    H = H0*np.sqrt(Omega_Lambda_0+(1-Omega_0)*(1+z)**2+Omega_M_0*(1+z)**3+Omega_r_0*(1+z)**4)
+    return H
+
+def assign_t_discrete_by_z_discrete(z_discrete):
+    global time_z_max, time_z0#, dt
+
+    time_z_max = exactime(z_max)#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    time_z0 = exactime(0)
+
+    t_discrete = 0.0*z_discrete
+    t_discrete[0] = time_z0
+
+    for i in range(np.size(z_discrete)-1):
+        t_discrete[i+1] = t_discrete[i] + dt2dz((z_discrete[i+1]+z_discrete[i])/2)*dz
+
+    #dt = (t_discrete[0]-t_discrete[-1])/N_t_z
+
+    print('time(z_max)=',time_z_max)
+    print('time(0)=',time_z0)
+    print('t_discrete(z_max)=',t_discrete[-1])
+    print('t_discrete(0)=',t_discrete[0])
+    '''
+    plt.scatter(t*9.78*10**8,1/(1+z),color='blue',label='scale parameter',s=1)
+    plt.xlabel('time / kyr')
+    plt.ylabel('scale parameter a(t)')
+    plt.legend()
+    plt.show()
+    '''
+    return t_discrete
+
+def redshift(t):
+    z = 0
+    for i in range(N_t_z):
+        if (t_discrete[i] <= t and t <= t_discrete[i+1]) or (t_discrete[i] >= t and t >= t_discrete[i+1]):
+            z = z_discrete[i] + (t - t_discrete[i])*(z_discrete[i+1]-z_discrete[i])/(t_discrete[i+1]-t_discrete[i])
+            break
+    return z
+
+    '''
+    z = 0*t
+    for j in range(np.size(t)):
+        for i in range(N_t_z):
+            if (t_discrete[i] <= t[j] and t[j] <= t_discrete[i+1]) or (t_discrete[i] >= t[j] and t[j] >= t_discrete[i+1]):
+                z[j] = z_discrete[i] + (t[j] - t_discrete[i])*(z_discrete[i+1]-z_discrete[i])/(t_discrete[i+1]-t_discrete[i])
+                #print('i exist!')
+                break
+    return z
+    '''
+
+def u_th(m_t):
+    u_th = np.sqrt(Cs.k*(T_b/m_t + T_chi/m_chi))
+    return u_th
+
+def F(r_t):
+    F = math.erf(r_t/np.sqrt(2)) - np.sqrt(2/np.pi)*r_t*math.exp(-r_t**2 / 2)
+    return F
+
+def r_t(m_t):
+    r_t = v_chi_b/u_th(m_t)
+    return r_t
+
+def part_eq8_b(z,m_t):
+    part_eq8_b = (m_chi*m_t/(m_chi + m_t)**2)*(sigma_t_mean(z,m_t)/u_th(m_t))*(np.sqrt(2/np.pi)*(math.exp(-r_t(m_t)**2 /2)/u_th(m_t)**2)*Cs.k*(T_chi - T_b) + m_chi*F(r_t(m_t))/r_t(m_t))
+    return part_eq8_b
+
+def part_eq8_chi(z,m_t):
+    part_eq8_chi = (m_chi*m_t/(m_chi + m_t)**2)*(sigma_t_mean(z,m_t)/u_th(m_t))*(np.sqrt(2/np.pi)*(math.exp(-r_t(m_t)**2 /2)/u_th(m_t)**2)*Cs.k*(T_b - T_chi) + m_t*F(r_t(m_t))/r_t(m_t))
+    return part_eq8_chi
+
+def Q_b_rate(z):
+    Q_b_rate = Cs.c**4 / Cs.k * n_chi(z)*(x_e/(1+f_He))*(part_eq8_b(z,Cs.m_e)+part_eq8_b(z,Cs.m_p))
+    return Q_b_rate
+
+def n_H(z):
+    n_H = 2e-1*(1+z)**3 # m^-3; 2e-7*(1+z)**3 cm^-3. https://www.uio.no/studier/emner/matnat/astro/AST4320/h14/beskjeder/combinednotesiipostmidterm.pdf
+    #print('n_H')
+    return n_H
+
+def Q_chi_rate(z):
+    Q_chi_rate = Cs.c**4 / Cs.k * n_H(z)*(x_e/(1+f_He))*(part_eq8_chi(z,Cs.m_e)+part_eq8_chi(z,Cs.m_p))
+    #print('Q_chi_rate!!!!!!!!!!!!!!!!')
+    return Q_chi_rate
+
+def Gamma_C(z):
+    Gamma_C = Cs.k**4 / (Cs.hbar*Cs.c)**3 * (8*Cs.physical_constants["Thomson cross section"][0]*Cs.Stefan_Boltzmann*T_gamma(z)**4*x_e)/(3*(1+f_He)*Cs.m_e*Cs.c)
+    return Gamma_C
+
+def T_gamma(z):
+    T_gamma = 2.73*(1+z)
+    return T_gamma
+
+def sigma_t_mean(z,m_t):
+    sigma_t_mean = (2*np.pi*Xi(z)*(Cs.c*Cs.hbar*Cs.alpha*epsilon)**2)/(mu_chi_t(m_t)**2*v_chi_b**4)
+    return sigma_t_mean
+
+def mu_chi_t(m_t):
+    mu_chi_t = m_t*m_chi/(m_t+m_chi)
+    return mu_chi_t
+
+def Xi(z):
+    #Xi = np.log((9*(T_b)**3)/(4*np.pi*epsilon**2*(Cs.alpha)**3*x_e*n_H(z)))
+    Xi = np.log((9*(T_b*Cs.k)**3)/(4*np.pi*epsilon**2*(Cs.alpha*Cs.hbar*Cs.c)**3*x_e*n_H(z)))
+    return Xi
+
+def D_part(z,m_t):
+    D_part = Cs.c**4 * sigma_t_mean(z,m_t)*((m_chi*n_chi(z)+rho_b(z))/(m_chi+m_t))*((m_t*n_H(z))/(rho_b(z)))*(F(r_t(m_t))/v_chi_b**2)
+    # infinity here !!!!!!!!!!!!!!!
+    return D_part
+
+def D(z):
+    D = D_part(z,Cs.m_e) + D_part(z,Cs.m_p)
+    return D
+
+def n_chi(z):
+    n_chi = f_dm*rho_d(z)/m_chi
+    return n_chi
+
+def rho_b(z):
+    rho_b = rho_b_0*(1+z)**3 # w = p/rho = 0.0
+    return rho_b
+
+def rho_d(z):
+    rho_d = rho_d_0*(1+z)**3 # w = p/rho = 0.0
+    return rho_d
+
+def A_B(z):
+    'effective case B recombination coefficient; unit: cm^3 sec^-1'
+    A_B = 2.84e-19 / np.sqrt(T_gamma(z)*1e-4) # m^3/s; 2.84*10**-13 / np.sqrt(T_gamma(z)*1e-4) # Peebles 1968
+    return A_B
+
+def B_B(z):
+    B_B = A_B(z)*np.exp(E_0/(4*Cs.k*T_gamma(z)))*(2*np.pi*Cs.m_e*Cs.k*T_gamma(z))**1.5 / Cs.h**3
+    return B_B
+
+def differential_equations(initial, t):
+    #global T_b
+    T_b, T_chi, x_e, v_chi_b = initial
+
+    z = redshift(t)
+    H = Hubble_constant(z)
+
+    T_b_rate = -2*H*T_b #+ 2*Q_b_rate(z)/3 + Gamma_C(z)*(T_gamma(z)-T_b)*1000000
+    T_chi_rate = -2*H*T_chi + 2*Q_chi_rate(z)/3 #########################!!!!!!!!!!!!!!!!!!!!!!!
+    x_e_rate = -recombination_factor*(n_H(z)*A_B(z)*x_e**2-4*(1-x_e)*B_B(z)*np.exp(3*E_0/(4*Cs.k*T_gamma(z))))
+    v_chi_b_rate = -H*v_chi_b - D(z)
+
+    return [T_b_rate, T_chi_rate, x_e_rate, v_chi_b_rate]
+
+
+z_discrete = np.arange(0.0,z_max+dz,dz) # np.arange(0.0,z_max+dz,dz)
+t_discrete = assign_t_discrete_by_z_discrete(z_discrete)
+
+t_array = np.linspace(t_discrete[-1], t_discrete[0], N_t_z + 1)
+z_array = 0*t_array
+for i in range(np.size(t_array)):
+    z_array[i] = redshift(t_array[i])
+
+thermal_evolution = odeint(differential_equations, [T_b, T_chi, x_e, v_chi_b], t_array)
+
+T_b_evolution = thermal_evolution[:,0]
+T_chi_evolution = thermal_evolution[:,1]
+x_e_evolution = thermal_evolution[:,2]
+v_chi_b_evolution = thermal_evolution[:,3]
+
+
+plt.plot(z_array, T_b_evolution, label = r'$T_b$', linestyle='-')
+plt.plot(z_array, T_chi_evolution, label = r'$T_\chi$', linestyle=':')
+plt.ylabel(r'$\mathrm{T\ /\ K}$')
+
+
+'''
+plt.plot(z_array, x_e_evolution, label = r'$x_e$')
+plt.ylabel(r'$x_e$')
+'''
+
+'''
+plt.plot(z_array, v_chi_b_evolution*10**-3, label = r'$v_{\chi,b}$')
+plt.ylabel(r'$v_{\chi,b}\ (km/s)$')
+'''
+
+
+plt.xlabel(r'$\mathrm{redshift}\ z$')
+#plt.xlabel(r'$time\ /\ \mathrm{kyr}$')
+
+plt.legend()
+plt.savefig("/home/xia/Bin/%s/%sN_t_z%s.png"%(now.strftime("%m%d"), now.strftime("%H%M"), N_t_z))
+#plt.show()
