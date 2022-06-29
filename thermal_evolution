@@ -7,6 +7,8 @@ import scipy.constants as Cs
 import datetime
 import os
 
+from sympy import Lambda
+
 now = datetime.datetime.now()
 if not os.path.exists("/home/xia/Bin/%s/"%(now.strftime("%m%d"))):
     os.makedirs("/home/xia/Bin/%s/"%(now.strftime("%m%d")))
@@ -36,14 +38,22 @@ f_dm = 1e-2
 T_b = 2.73*(z_max+1) # K
 T_chi = 0 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!  K     2.73*(z_max+1) #
 x_e = 2e-4 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!1 # 
-v_chi_b = 29000 # m/s; 29.0 km/s root mean squared velocity
-
+v_chi_b_0 = 1#29000 # m/s; 29.0 km/s root mean squared velocity#
+v_chi_b = v_chi_b_0
 E_0 = -2.1789602e-18 # J; -13.6 eV
 
-recombination_factor = 0.8 # !!!!!!!!!!!!!!! not a constant
-
+Lambda_2s_1s = 8.227 # sec**-1, peebles
+lambda_alpha = 1.21267e-7 # m
 
 # define functions:
+def Peebles_C_factor(z):
+    'refer to eq. 11 of paper E:/papers/PhysRevD.83.043513.pdf or http://dx.doi.org/10.1103/PhysRevD.83.043513'
+    H = Hubble_parameter(z)
+    R_Ly_alpha = (8*np.pi*H)/(3*n_H(z)*(1-x_e)*lambda_alpha**3)
+
+    C = (3*R_Ly_alpha+Lambda_2s_1s)/(3*R_Ly_alpha+Lambda_2s_1s+4*B_B(z))
+    return C
+
 def Hubble_parameter(z):
     H = H0*np.sqrt(Omega_Lambda_0+(1-Omega_0)*(1+z)**2+Omega_M_0*(1+z)**3+Omega_r_0*(1+z)**4)
     return H
@@ -71,7 +81,7 @@ def part_eq8_chi(z,m_t):
     return part_eq8_chi
 
 def Q_b_rate(z):
-    Q_b_rate = n_chi(z)*(x_e/(1+f_He))*(part_eq8_b(z,Cs.m_e)+part_eq8_b(z,Cs.m_p)) / Cs.k# * Cs.c**4
+    Q_b_rate = n_chi(z)*(x_e/(1+f_He))*(part_eq8_b(z,Cs.m_e)+part_eq8_b(z,Cs.m_p)) * Cs.c**4 / Cs.k
     #print(Q_b_rate)
     return Q_b_rate
 
@@ -81,7 +91,7 @@ def n_H(z):
     return n_H
 
 def Q_chi_rate(z):
-    Q_chi_rate = n_H(z)*(x_e/(1+f_He))*(part_eq8_chi(z,Cs.m_e)+part_eq8_chi(z,Cs.m_p)) / Cs.k# * Cs.c**4
+    Q_chi_rate = n_H(z)*(x_e/(1+f_He))*(part_eq8_chi(z,Cs.m_e)+part_eq8_chi(z,Cs.m_p)) * Cs.c**4 / Cs.k
     #print(Q_chi_rate)
     return Q_chi_rate
 
@@ -95,7 +105,7 @@ def T_gamma(z):
     return T_gamma
 
 def sigma_t_mean_0(z,m_t):
-    sigma_t_mean_0 = (2*np.pi*Xi(z)*(Cs.c*Cs.hbar*Cs.alpha*epsilon)**2)/(mu_chi_t(m_t)**2)# * Cs.c**4) #*v_chi_b**4) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    sigma_t_mean_0 = (2*np.pi*Xi(z)*(Cs.c*Cs.hbar*Cs.alpha*epsilon)**2)/(mu_chi_t(m_t)**2 * Cs.c**4) #*v_chi_b**4) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     print(sigma_t_mean_0)
     return sigma_t_mean_0
 
@@ -109,7 +119,7 @@ def Xi(z):
     return Xi
 
 def D_part(z,m_t):
-    D_part = sigma_t_mean_0(z,m_t)*((m_chi*n_chi(z)+rho_b(z))/(m_chi+m_t))*((m_t*n_H(z))/(rho_b(z)))*(F(r_t(m_t))/v_chi_b**2) #* Cs.c**4
+    D_part = sigma_t_mean_0(z,m_t)*((m_chi*n_chi(z)+rho_b(z))/(m_chi+m_t))*((m_t*n_H(z))/(rho_b(z)))*(F(r_t(m_t))/v_chi_b**2) * Cs.c**4
     # infinity here !!!!!!!!!!!!!!!
     return D_part
 
@@ -147,7 +157,7 @@ def derivatives2z(initial, z):
     dT_chi2dz = (-2*H*T_chi + 2/3*Q_chi_rate(z))/(-H*(1+z))
     dT_b2dz = (-2*H*T_b + Gamma_C(z)*(T_gamma(z)-T_b) + 2/3*Q_b_rate(z))/(-H*(1+z))
     dv_chi_b2dz = (-H*v_chi_b - D(z))/(-H*(1+z))
-    dx_e2dz = (-recombination_factor*(n_H(z)*A_B(z)*x_e**2-4*(1-x_e)*B_B(z)*np.exp(3*E_0/(4*Cs.k*T_gamma(z)))))/(-H*(1+z))
+    dx_e2dz = (-Peebles_C_factor(z)*(n_H(z)*A_B(z)*x_e**2-4*(1-x_e)*B_B(z)*np.exp(3*E_0/(4*Cs.k*T_gamma(z)))))/(-H*(1+z))
 
     return [dT_b2dz, dT_chi2dz, dx_e2dz, dv_chi_b2dz]
 
@@ -161,7 +171,7 @@ T_chi_evolution = thermal_evolution[:,1]
 x_e_evolution = thermal_evolution[:,2]
 v_chi_b_evolution = thermal_evolution[:,3]
 
-fig = plt.figure(figsize=(10, 6))
+fig = plt.figure(figsize=(12, 6))
 
 ax1 = fig.add_subplot(121)
 ax1.plot(z_array, T_b_evolution, label = r'$T_b$', c = 'red', linestyle='--')
@@ -197,5 +207,5 @@ labs = [l.get_label() for l in lns]
 ax2.legend(lns, labs, loc=0)
 
 #plt.suptitle('evolution')
-plt.savefig("/home/xia/Bin/%s/%sN_z%s.png"%(now.strftime("%m%d"), now.strftime("%H%M"), N_z))
+plt.savefig("/home/xia/Bin/%s/%sV%s.png"%(now.strftime("%m%d"), now.strftime("%H%M"), v_chi_b_0*10**-3))
 plt.show()
